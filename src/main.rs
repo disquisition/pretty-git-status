@@ -1,17 +1,10 @@
 use colored_truecolor::Colorize;
 use git2::{Branch, ErrorCode, Repository, RepositoryState, Status, Statuses};
-use std::env;
 use std::fs;
 use std::io::{stdout, Write};
-use std::path::PathBuf;
 
 fn main() {
-    let cwd = match env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(_e) => return,
-    };
-
-    let repo = match Repository::open(&cwd) {
+    let repo = match Repository::open_from_env() {
         Ok(repo) => repo,
         Err(_e) => return,
     };
@@ -57,7 +50,7 @@ fn main() {
 
     let total_conflicted = count_by_status(&statuses, Status::CONFLICTED);
 
-    let total_stashed = count_stash(&cwd);
+    let total_stashed = count_stash();
 
     let mut git_status = String::new();
 
@@ -190,8 +183,8 @@ fn count_by_status(statuses: &Statuses, status: Status) -> i32 {
     return counter;
 }
 
-fn count_stash(path: &PathBuf) -> i32 {
-    let mut repo = match Repository::open(path) {
+fn count_stash() -> i32 {
+    let mut repo = match Repository::open_from_env() {
         Ok(repo) => repo,
         Err(_e) => return 0,
     };
