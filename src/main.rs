@@ -1,7 +1,7 @@
 use colored_truecolor::Colorize;
 use git2::{
-    Branch, Cred, Error, ErrorCode, FetchOptions, RemoteCallbacks, Repository, RepositoryState,
-    Status, Statuses,
+    Branch, Cred, ErrorCode, FetchOptions, RemoteCallbacks, Repository, RepositoryState, Status,
+    Statuses,
 };
 use std::fs;
 use std::io::{stdout, Write};
@@ -154,7 +154,7 @@ fn try_fetch_current_branch(repo: &Repository) -> Option<()> {
     callbacks.credentials(
         |_url, username_from_url, _allowed_types| match username_from_url {
             Some(username) => Cred::ssh_key_from_agent(username),
-            None => Err(Error::from_str("Could not retrieve username from url")),
+            None => Cred::default(),
         },
     );
 
@@ -162,7 +162,9 @@ fn try_fetch_current_branch(repo: &Repository) -> Option<()> {
 
     options.remote_callbacks(callbacks);
 
-    remote.fetch(&[branch_upstream_name], Some(&mut options), None).ok()
+    remote
+        .fetch(&[branch_upstream_name], Some(&mut options), None)
+        .ok()
 }
 
 fn get_head_name(repo: &Repository) -> Option<String> {
