@@ -10,31 +10,26 @@ use std::time::Duration;
 fn main() {
     let repo = match Repository::open_from_env() {
         Ok(repo) => repo,
-        Err(_e) => return,
+        _ => return,
     };
 
     try_fetch_current_branch(&repo);
 
     let statuses = match repo.statuses(None) {
         Ok(statuses) => statuses,
-        Err(_e) => return,
+        _ => return,
     };
 
+    let head_name = get_head_name(&repo).unwrap_or(String::from("<unknown>"));
     let repo_state = match repo.state() {
-        RepositoryState::Merge | RepositoryState::RebaseMerge => String::from("MERGING"),
-        RepositoryState::Rebase | RepositoryState::RebaseInteractive => String::from("REBASING"),
-        _ => String::new(),
+        RepositoryState::Merge | RepositoryState::RebaseMerge => Some("MERGING"),
+        RepositoryState::Rebase | RepositoryState::RebaseInteractive => Some("REBASING"),
+        _ => None,
     };
 
-    let head_label = match get_head_name(&repo) {
-        Some(name) => {
-            if repo_state.is_empty() {
-                name
-            } else {
-                format!("{}|{}", name, repo_state)
-            }
-        }
-        None => String::from("<unknown>"),
+    let head_label = match repo_state {
+        Some(state) => format!("{}|{}", head_name, state),
+        _ => head_name,
     };
 
     let (is_local_only_branch, ahead, behind) = get_head_info(&repo);
@@ -120,7 +115,7 @@ fn try_fetch_current_branch(repo: &Repository) -> Option<()> {
 
     // If we're not on a branch, don't bother
     if !head.is_branch() {
-        return Some(());
+        return None;
     }
 
     let mut fetch_head_path = repo.path().to_owned();
@@ -133,7 +128,7 @@ fn try_fetch_current_branch(repo: &Repository) -> Option<()> {
         let fifteen_minutes = Duration::from_secs(60 * 15);
 
         if elapsed < fifteen_minutes {
-            return Some(());
+            return None;
         }
     }
 
@@ -206,7 +201,7 @@ fn get_head_name(repo: &Repository) -> Option<String> {
 fn get_head_info(repo: &Repository) -> (bool, usize, usize) {
     let head = match repo.head() {
         Ok(head) => head,
-        Err(_e) => return (false, 0, 0),
+        _ => return (false, 0, 0),
     };
 
     if !head.is_branch() {
@@ -217,16 +212,24 @@ fn get_head_info(repo: &Repository) -> (bool, usize, usize) {
 
     let upstream = match branch.upstream() {
         Ok(upstream) => upstream,
-        Err(_e) => return (true, 0, 0),
+        _ => return (true, 0, 0),
     };
 
-    return match repo.graph_ahead_behind(
-        branch.get().target().unwrap(),
-        upstream.get().target().unwrap(),
-    ) {
-        Ok((ahead, behind)) => (false, ahead, behind),
-        Err(_e) => (false, 0, 0),
+    let branch_oid = match branch.get().target() {
+        Some(branch_oid) => branch_oid,
+        _ => return (false, 0, 0),
     };
+
+    let upstream_oid = match upstream.get().target() {
+        Some(upstream_oid) => upstream_oid,
+        _ => return (false, 0, 0),
+    };
+
+    let (ahead, behind) = repo
+        .graph_ahead_behind(branch_oid, upstream_oid)
+        .unwrap_or((0, 0));
+
+    return (false, ahead, behind);
 }
 
 fn count_by_status(statuses: &Statuses, status: Status) -> i32 {
@@ -244,17 +247,17 @@ fn count_by_status(statuses: &Statuses, status: Status) -> i32 {
 fn count_stash() -> i32 {
     let mut repo = match Repository::open_from_env() {
         Ok(repo) => repo,
-        Err(_e) => return 0,
+        _ => return 0,
     };
 
     let mut counter = 0;
 
-    return match repo.stash_foreach(|_one, _two, _three| {
+    repo.stash_foreach(|_one, _two, _three| {
         counter += 1;
 
         return true;
-    }) {
-        Ok(_value) => counter,
-        Err(_e) => 0,
-    };
+    })
+    .ok();
+
+    return counter;
 }
