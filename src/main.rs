@@ -1,13 +1,19 @@
 use colored_truecolor::Colorize;
-use git2::{Branch, ErrorCode, Repository, RepositoryState, Status, Statuses};
+use git2::{
+    Branch, Cred, Error, ErrorCode, FetchOptions, RemoteCallbacks, Repository, RepositoryState,
+    Status, Statuses,
+};
 use std::fs;
 use std::io::{stdout, Write};
+use std::time::Duration;
 
 fn main() {
     let repo = match Repository::open_from_env() {
         Ok(repo) => repo,
         Err(_e) => return,
     };
+
+    try_fetch_current_branch(&repo);
 
     let statuses = match repo.statuses(None) {
         Ok(statuses) => statuses,
@@ -109,6 +115,56 @@ fn main() {
     stdout().write(git_status.as_bytes()).unwrap();
 }
 
+fn try_fetch_current_branch(repo: &Repository) -> Option<()> {
+    let head = repo.head().ok()?;
+
+    // If we're not on a branch, don't bother
+    if !head.is_branch() {
+        return Some(());
+    }
+
+    let mut fetch_head_path = repo.path().to_owned();
+
+    fetch_head_path.push("FETCH_HEAD");
+
+    // If we already fetched in the last 15 minutes, don't bother
+    if let Ok(metadata) = fs::metadata(fetch_head_path) {
+        let elapsed = metadata.modified().ok()?.elapsed().ok()?;
+        let fifteen_minutes = Duration::from_secs(60 * 15);
+
+        if elapsed < fifteen_minutes {
+            return Some(());
+        }
+    }
+
+    let refname = head.name()?;
+    let branch_upstream_remote_buf = repo.branch_upstream_remote(refname).ok()?;
+    let branch_upstream_remote = branch_upstream_remote_buf.as_str()?;
+
+    let mut remote = repo.find_remote(branch_upstream_remote).ok()?;
+
+    let branch_upstream_name_buf = repo.branch_upstream_name(refname).ok()?;
+    let branch_upstream_name = branch_upstream_name_buf
+        .as_str()
+        .map(|str| str.split('/').last().to_owned())??;
+
+    let mut callbacks = RemoteCallbacks::new();
+
+    // Look for credentials on the ssh-agent
+    callbacks.credentials(
+        |_url, username_from_url, _allowed_types| match username_from_url {
+            Some(username) => Cred::ssh_key_from_agent(username),
+            None => Err(Error::from_str("Could not retrieve username from url")),
+        },
+    );
+
+    let mut options = FetchOptions::new();
+
+    options.remote_callbacks(callbacks);
+
+    remote.fetch(&[branch_upstream_name], Some(&mut options), None).ok()
+}
+
 fn get_head_name(repo: &Repository) -> Option<String> {
     let head = match repo.head() {
         Ok(head) => head,
@@ -147,7 +203,7 @@ fn get_head_name(repo: &Repository) -> Option<String> {
 
 fn get_head_info(repo: &Repository) -> (bool, usize, usize) {
     let head = match repo.head() {
-        Ok(head_ref) => head_ref,
+        Ok(head) => head,
         Err(_e) => return (false, 0, 0),
     };
 
